@@ -14,7 +14,7 @@ This project is developed and maintained with ❤️ by [Kai](https://kaisoapbox
 
 ## How to Run
 
-Just open the project in Android Studio, and it should work!
+Add the model you want to use under `app/src/main/assets/models/` (e.g. `ggml-tiny.en.bin`). Then, just open the project in Android Studio, and it should work!
 
 ## Build
 
