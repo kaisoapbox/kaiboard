@@ -1,0 +1,30 @@
+<resources>
+    <string name="app_name">Kaiboard</string>
+    <string name="start_recording">Record</string>
+    <string name="cancel_recording">Cancel</string>
+    <string name="stop_recording">Transcribe</string>
+    <string name="transcribing">Transcribing…</string>
+    <string name="start_test">Start test</string>
+    <string name="stop_test">Stop test</string>
+    <string name="test_description">Test your setup and view logs below.</string>
+    <string name="permission_button">Grant Mic Permission</string>
+    <string name="permission_granted">Permission granted!</string>
+    <string name="input_method_button">Enable Kaiboard</string>
+    <string name="input_method_description">Enable in input method settings</string>
+    <string name="support_text">Consider supporting Kai on Ko-Fi!</string>
+    <string name="more_button">More by Kai</string>
+    <string name="setup_header">Essential Setup</string>
+    <string name="advanced_header">Advanced</string>
+    <string name="return_button">Return</string>
+    <string name="delete_button">Backspace</string>
+    <string name="switch_keyboard_button">Switch Keyboard</string>
+    <string name="benchmark">Run Benchmark</string>
+    <string name="benchmark_description">Benchmarking will take a few minutes.</string>
+    <string name="settings">Kaiboard Settings</string>
+    <string name="preference_file_key">kaizo.co.WhisperVoiceKeyboard.settings</string>
+    <string name="num_threads">num_threads</string>
+    <string name="num_threads_option">Num Threads</string>
+    <string name="casual_mode">casual_mode</string>
+    <string name="casual_option">casual mode</string>
+    <string name="casual_description">lowercase &amp; no ending ./,/;</string>
+</resources>
