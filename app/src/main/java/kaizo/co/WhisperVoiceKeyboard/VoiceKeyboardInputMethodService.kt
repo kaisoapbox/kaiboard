@@ -3,6 +3,9 @@ package kaizo.co.WhisperVoiceKeyboard
 import android.content.Context
 import android.content.SharedPreferences
 import android.inputmethodservice.InputMethodService
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
@@ -19,10 +22,12 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.whispercpp.whisper.WhisperContext
+import kaizo.co.WhisperVoiceKeyboard.media.decodeShortArray
 import kaizo.co.WhisperVoiceKeyboard.media.decodeWaveFile
 import kaizo.co.WhisperVoiceKeyboard.recorder.Recorder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -35,6 +40,26 @@ class VoiceKeyboardInputMethodService : InputMethodService(), LifecycleOwner,
     SavedStateRegistryOwner {
     private val job = SupervisorJob()
     private val scope = CoroutineScope(Dispatchers.IO + job)
+
+    // handle audio manager
+    private val audioManager: AudioManager by lazy {
+        getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    }
+    private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        when (focusChange) {
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT, AudioManager.AUDIOFOCUS_LOSS -> {
+                Log.w(LOG_TAG, "loss of focus")
+                toggleRecord()
+            }
+        }
+    }
+
+    private val focusRequest: AudioFocusRequest =
+        AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT).setAudioAttributes(
+            AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
+        ).setAcceptsDelayedFocusGain(false).setOnAudioFocusChangeListener(focusChangeListener)
+            .build()
 
     override fun onStartInputView(editorInfo: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(editorInfo, restarting)
@@ -98,6 +123,14 @@ class VoiceKeyboardInputMethodService : InputMethodService(), LifecycleOwner,
     private var samplesPath: File? = null
     private var sharedPref: SharedPreferences? = null
     private val maxThreads = Runtime.getRuntime().availableProcessors()
+    private var currentJob: Job? = null
+    private var trailing: String? = null
+
+    private fun checkBoolPref(resource: Int): Boolean? {
+        return sharedPref?.getBoolean(
+            application.getString(resource), false
+        )
+    }
 
     private fun printSystemInfo() {
         printMessage(String.format("System Info: %s\n", WhisperContext.getSystemInfo()))
@@ -142,15 +175,25 @@ class VoiceKeyboardInputMethodService : InputMethodService(), LifecycleOwner,
         //whisperContext = WhisperContext.createContextFromFile(firstModel.absolutePath)
     }
 
-    private suspend fun transcribeAudio(file: File) {
+    private suspend fun transcribeFile(file: File) {
         if (!canTranscribe) {
             return
         }
         canTranscribe = false
-
         try {
+            currentJob?.cancel()
             printMessage("Reading wave samples... ")
             val data = decodeWaveFile(file)
+            transcribeAudio(data)
+            currentInputConnection.finishComposingText()
+        } catch (e: Exception) {
+            Log.w(LOG_TAG, e)
+            printMessage("${e.localizedMessage}\n")
+        }
+    }
+
+    private suspend fun transcribeAudio(data: FloatArray) {
+        try {
             printMessage("${data.size / (16000 / 1000)} ms\n")
             val nThreads =
                 sharedPref?.getInt(application.getString(R.string.num_threads), maxThreads)
@@ -159,15 +202,12 @@ class VoiceKeyboardInputMethodService : InputMethodService(), LifecycleOwner,
             var text = whisperContext?.transcribeData(data, false, nThreads ?: maxThreads)?.trim()
             printMessage(text.toString())
             // remove special tokens like [MUSIC] or [BLANK_AUDIO]
-            // bizarrely, it sometimes also does *music* or (music) so handle these cases too
+            // bizarrely, it sometimes also does *music* or (music) so handle these case-s too
             // there's another case with flanking ♪ but it seems slightly different
             text = text?.replace(Regex("""\[[-_a-zA-Z0-9 ]*]"""), "")
             text = text?.replace(Regex("""\*[-_a-zA-Z0-9 ]*\*"""), "")
             text = text?.replace(Regex("""\([-_a-zA-Z0-9 ]*\)"""), "")
-            if (sharedPref?.getBoolean(
-                    application.getString(R.string.casual_mode), false
-                ) == true
-            ) {
+            if (checkBoolPref(R.string.casual_mode) == true) {
                 printMessage("keeping it casual...\n")
                 text = text?.trim()?.lowercase()
                 // remove trailing punctuation but not e.g. ! or ?
@@ -176,10 +216,10 @@ class VoiceKeyboardInputMethodService : InputMethodService(), LifecycleOwner,
                     text = text.slice(0..<text.lastIndex)
                 }
             }
-            // commit text only if non-empty
-            // avoids committing just a single space for empty messages
+            // add text only if non-empty
+            // avoids adding just a single space for empty messages
             if (text?.length!! > 0) {
-                currentInputConnection.commitText("$text ", 1)
+                currentInputConnection.setComposingText(text + (trailing ?: ""), 1)
             }
             val elapsed = System.currentTimeMillis() - start
             printMessage("Done ($elapsed ms): \n$text\n")
@@ -194,6 +234,11 @@ class VoiceKeyboardInputMethodService : InputMethodService(), LifecycleOwner,
     fun cancelRecord() = scope.launch {
         try {
             if (isRecording) {
+                if (checkBoolPref(R.string.pause_media) == true) {
+                    focusRequest.let { audioManager.abandonAudioFocusRequest(it) }
+                }
+                currentJob?.cancel()
+                currentInputConnection.finishComposingText()
                 recorder.stopRecording()
                 isRecording = false
             }
@@ -204,24 +249,64 @@ class VoiceKeyboardInputMethodService : InputMethodService(), LifecycleOwner,
         }
     }
 
+    private val onError = { e: Exception ->
+        scope.launch {
+            withContext(Dispatchers.Main) {
+                printMessage("${e.localizedMessage}\n")
+                currentJob?.cancel()
+                isRecording = false
+            }
+        }
+    }
+
+    private val transcriptionCallback = { shortData: ShortArray ->
+        if (currentJob == null) {
+            currentJob = scope.launch {
+                printMessage(shortData.size.toString())
+                // convert ShortArray to FloatArray for transcription
+                val floatData = decodeShortArray(shortData, 1)
+                transcribeAudio(floatData)
+                currentJob = null
+            }
+        }
+    }
+
     fun toggleRecord() = scope.launch {
         try {
             if (isRecording) {
+                if (checkBoolPref(R.string.pause_media) == true) {
+                    focusRequest.let { audioManager.abandonAudioFocusRequest(it) }
+                }
+                currentJob?.cancel()
                 recorder.stopRecording()
                 isRecording = false
-                recordedFile?.let { transcribeAudio(it) }
+                recordedFile?.let { transcribeFile(it) }
             } else {
-                val file = getTempFileForRecording()
-                recorder.startRecording(file) { e ->
-                    scope.launch {
-                        withContext(Dispatchers.Main) {
-                            printMessage("${e.localizedMessage}\n")
-                            isRecording = false
-                        }
+                if (checkBoolPref(R.string.pause_media) == true) {
+                    // Request focus
+                    val result = audioManager.requestAudioFocus(focusRequest)
+                    if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+                        // Failed to gain audio focus
+                        Log.w(LOG_TAG, "Failed to gain audio focus")
+                        return@launch
                     }
                 }
+                trailing = null
+                val file = getTempFileForRecording()
+                recorder.startRecording(file, onError, transcriptionCallback)
                 isRecording = true
                 recordedFile = file
+                // if not preceded by empty space, commit empty space
+                val charBefore = currentInputConnection.getTextBeforeCursor(1, 0)
+                if (charBefore?.isNotEmpty()?.and(charBefore != " ") == true) {
+                    currentInputConnection.commitText(" ", 1)
+                }
+                // if not followed by empty space, add trailing space
+                val charAfter = currentInputConnection.getTextAfterCursor(1, 0)
+                if (charAfter != " ") {
+                    trailing = " "
+                }
+
             }
         } catch (e: Exception) {
             Log.w(LOG_TAG, e)
@@ -240,7 +325,7 @@ class VoiceKeyboardInputMethodService : InputMethodService(), LifecycleOwner,
         currentInputConnection.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, key))
     }
 
-    fun renderGlobe(): Boolean {
+    fun shouldRenderSwitcher(): Boolean {
         return shouldOfferSwitchingToNextInputMethod()
     }
 

@@ -93,7 +93,7 @@ class VoiceKeyboardView(private val service: VoiceKeyboardInputMethodService) :
                         stringResource(R.string.return_button)
                     )
                 }
-                if (service.renderGlobe()) {
+                if (service.shouldRenderSwitcher()) {
                     Button(
                         onClick = { service.switchKeyboard() },
                         modifier = Modifier

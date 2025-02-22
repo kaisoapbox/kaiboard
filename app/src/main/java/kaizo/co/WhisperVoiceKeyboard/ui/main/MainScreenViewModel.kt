@@ -15,9 +15,11 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.whispercpp.whisper.WhisperContext
 import kaizo.co.WhisperVoiceKeyboard.R
+import kaizo.co.WhisperVoiceKeyboard.media.decodeShortArray
 import kaizo.co.WhisperVoiceKeyboard.media.decodeWaveFile
 import kaizo.co.WhisperVoiceKeyboard.recorder.Recorder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -40,6 +42,7 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
     private var whisperContext: WhisperContext? = null
     private var mediaPlayer: MediaPlayer? = null
     private var recordedFile: File? = null
+    private var currentJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -118,7 +121,17 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         mediaPlayer?.start()
     }
 
-    private suspend fun transcribeAudio(file: File) {
+    private suspend fun transcribeAudio(data: FloatArray) {
+        val nThreads =
+            sharedPref.getInt(application.getString(R.string.num_threads), maxThreads)
+        printMessage("Transcribing data...\n")
+        val start = System.currentTimeMillis()
+        val text = whisperContext?.transcribeData(data, numThreads = nThreads)
+        val elapsed = System.currentTimeMillis() - start
+        printMessage("Done ($elapsed ms): \n$text\n")
+    }
+
+    private suspend fun transcribeFile(file: File) {
         if (!canTranscribe) {
             return
         }
@@ -126,16 +139,11 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         canTranscribe = false
 
         try {
+            currentJob?.cancel()
             printMessage("Reading wave samples... ")
             val data = readAudioSamples(file)
             printMessage("${data.size / (16000 / 1000)} ms\n")
-            val nThreads =
-                sharedPref.getInt(application.getString(R.string.num_threads), maxThreads)
-            printMessage("Transcribing data...\n")
-            val start = System.currentTimeMillis()
-            val text = whisperContext?.transcribeData(data, numThreads = nThreads)
-            val elapsed = System.currentTimeMillis() - start
-            printMessage("Done ($elapsed ms): \n$text\n")
+            transcribeAudio(data)
         } catch (e: Exception) {
             Log.w(LOG_TAG, e)
             printMessage("${e.localizedMessage}\n")
@@ -144,23 +152,38 @@ class MainScreenViewModel(private val application: Application) : ViewModel() {
         canTranscribe = true
     }
 
+    private val onError = { e: Exception ->
+        viewModelScope.launch {
+            withContext(Dispatchers.Main) {
+                printMessage("${e.localizedMessage}\n")
+                isRecording = false
+            }
+        }
+    }
+
+    private val transcriptionCallback = { shortData: ShortArray ->
+        if (currentJob == null) {
+            currentJob = viewModelScope.launch {
+                printMessage(shortData.size.toString())
+                // convert ShortArray to FloatArray for transcription
+                val floatData = decodeShortArray(shortData, 1)
+                transcribeAudio(floatData)
+                currentJob = null
+            }
+        }
+
+    }
+
     fun toggleRecord() = viewModelScope.launch {
         try {
             if (isRecording) {
                 recorder.stopRecording()
                 isRecording = false
-                recordedFile?.let { transcribeAudio(it) }
+                recordedFile?.let { transcribeFile(it) }
             } else {
                 stopPlayback()
                 val file = getTempFileForRecording()
-                recorder.startRecording(file) { e ->
-                    viewModelScope.launch {
-                        withContext(Dispatchers.Main) {
-                            printMessage("${e.localizedMessage}\n")
-                            isRecording = false
-                        }
-                    }
-                }
+                recorder.startRecording(file, onError, transcriptionCallback)
                 isRecording = true
                 recordedFile = file
             }

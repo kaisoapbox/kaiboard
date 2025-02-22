@@ -6,6 +6,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import kaizo.co.WhisperVoiceKeyboard.media.encodeWaveFile
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -18,9 +19,13 @@ class Recorder {
     )
     private var recorder: AudioRecordThread? = null
 
-    suspend fun startRecording(outputFile: File, onError: (Exception) -> Unit) =
+    suspend fun startRecording(
+        outputFile: File,
+        onError: (Exception) -> Job,
+        transcriptionCallback: (ShortArray) -> Unit
+    ) =
         withContext(scope.coroutineContext) {
-            recorder = AudioRecordThread(outputFile, onError)
+            recorder = AudioRecordThread(outputFile, onError, transcriptionCallback)
             recorder?.start()
         }
 
@@ -34,7 +39,8 @@ class Recorder {
 
 private class AudioRecordThread(
     private val outputFile: File,
-    private val onError: (Exception) -> Unit
+    private val onError: (Exception) -> Job,
+    private val transcriptionCallback: (ShortArray) -> Unit
 ) :
     Thread("AudioRecorder") {
     private var quit = AtomicBoolean(false)
@@ -71,6 +77,8 @@ private class AudioRecordThread(
                     } else {
                         throw java.lang.RuntimeException("audioRecord.read returned $read")
                     }
+                    // run transcription callback
+                    transcriptionCallback(allData.toShortArray())
                 }
 
                 audioRecord.stop()

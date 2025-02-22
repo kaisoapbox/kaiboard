@@ -16,6 +16,7 @@ import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Mood
+import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Star
@@ -40,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
@@ -72,7 +74,8 @@ private fun MainScreen(
     )
     val maxThreads = Runtime.getRuntime().availableProcessors()
     val threadsStr = stringResource(R.string.num_threads)
-    val lowercaseStr = stringResource(R.string.casual_mode)
+    val casualMode = stringResource(R.string.casual_mode)
+    val pauseMediaStr = stringResource(R.string.pause_media)
     var nThreads by remember {
         mutableFloatStateOf(
             sharedPref.getInt(threadsStr, maxThreads).toFloat()
@@ -80,13 +83,23 @@ private fun MainScreen(
     }
     var lowercase by remember {
         mutableStateOf(
-            sharedPref.getBoolean(lowercaseStr, false)
+            sharedPref.getBoolean(casualMode, false)
+        )
+    }
+    var pauseMedia by remember {
+        mutableStateOf(
+            sharedPref.getBoolean(pauseMediaStr, false)
         )
     }
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text(stringResource(R.string.settings)) })
+            TopAppBar(title = {
+                Text(
+                    stringResource(R.string.settings),
+                    fontSize = 30.sp, fontWeight = FontWeight.Bold
+                )
+            })
         },
     ) { innerPadding ->
         LazyColumn(
@@ -96,7 +109,7 @@ private fun MainScreen(
             item { InputMethodButton() }
             item { PermissionButton() }
             item { MoreButton() }
-            item { SectionHeader(stringResource(R.string.advanced_header)) }
+            item { SectionHeader(stringResource(R.string.advanced_header), bp = 4.dp) }
             item {
                 ListItem(
                     headlineContent = { Text(stringResource(R.string.num_threads_option)) },
@@ -135,6 +148,25 @@ private fun MainScreen(
             }
             item {
                 ListItem(
+                    headlineContent = { Text(stringResource(R.string.pause_media_option)) },
+                    leadingContent = { Icon(Icons.Outlined.Pause, null) },
+                    supportingContent = {
+                        Text(stringResource(R.string.pause_media_description))
+                    },
+                    trailingContent = {
+                        Switch(checked = pauseMedia, onCheckedChange = {
+                            pauseMedia = it
+                            with(sharedPref.edit()) {
+                                putBoolean(pauseMediaStr, it)
+                                apply()
+                            }
+                        })
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            item {
+                ListItem(
                     headlineContent = { Text(stringResource(R.string.casual_option)) },
                     leadingContent = { Icon(Icons.Outlined.Mood, null) },
                     supportingContent = {
@@ -144,7 +176,7 @@ private fun MainScreen(
                         Switch(checked = lowercase, onCheckedChange = {
                             lowercase = it
                             with(sharedPref.edit()) {
-                                putBoolean(lowercaseStr, it)
+                                putBoolean(casualMode, it)
                                 apply()
                             }
                         })
@@ -166,14 +198,14 @@ private fun MainScreen(
 }
 
 @Composable
-private fun SectionHeader(header: String) {
+private fun SectionHeader(header: String, tp: Dp = 16.dp, bp: Dp = 0.dp) {
     Text(
         header,
         fontSize = 24.sp,
         fontWeight = FontWeight.Bold,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 16.dp, bottom = 0.dp, start = 16.dp, end = 0.dp)
+            .padding(top = tp, bottom = bp, start = 16.dp, end = 0.dp)
     )
 }
 

@@ -26,5 +26,8 @@
     <string name="num_threads_option">Num Threads</string>
     <string name="casual_mode">casual_mode</string>
     <string name="casual_option">casual mode</string>
+    <string name="pause_media">pause_media</string>
+    <string name="pause_media_option">Auto-pause Media</string>
+    <string name="pause_media_description">Pauses media when recording.</string>
     <string name="casual_description">lowercase &amp; no ending ./,/;</string>
 </resources>

@@ -15,6 +15,10 @@ fun decodeWaveFile(file: File): FloatArray {
     val shortBuffer = buffer.asShortBuffer()
     val shortArray = ShortArray(shortBuffer.limit())
     shortBuffer.get(shortArray)
+    return decodeShortArray(shortArray, channel)
+}
+
+fun decodeShortArray(shortArray: ShortArray, channel: Int): FloatArray {
     return FloatArray(shortArray.size / channel) { index ->
         when (channel) {
             1 -> (shortArray[index] / 32767.0f).coerceIn(-1f..1f)
